@@ -46,12 +46,34 @@ RUN apt-get update \
  && apt-get install -y -o Dpkg::Options::="--force-overwrite" --no-install-recommends \
        nvidia-${CUDA_DRV_MAJOR_VER}=${CUDA_DRV_MAJOR_VER}.${CUDA_DRV_MINOR_VER}-${CUDA_DRV_PATCH_VER} \
        cuda-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER}=${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}.${CUDA_PATCH_VER} \
- && rm -rf /var/lib/apt/lists/* \
- && echo ">> Remove symlinks {include,lib64} in '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}' and move symlink-target (for multi-stage build)" \
+ && rm -rf /var/lib/apt/lists/*
+
+#### Stage 1.2
+# prepares CUDA for multi-stage build
+FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOCKER_IMG_HASH} AS cudaprep
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DEBCONF_NONINTERACTIVE_SEEN=true
+
+ARG UBUNTU_VER
+ARG CUDA_MAJOR_VER
+ARG CUDA_MINOR_VER
+ARG CUDA_PATCH_VER
+ARG CUDA_DRV_MAJOR_VER
+ARG CUDA_DRV_MINOR_VER
+ARG CUDA_DRV_PATCH_VER
+
+COPY --from=cuda /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER} /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}
+
+RUN echo ">> Remove symlinks {include,lib64} in '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}' and move symlink-target (for multi-stage build)" \
  && rm -f /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
           /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
  && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/include /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
- && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64
+ && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
+ && echo ">> remove '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/doc' (saves ~300MB)" \
+ && rm -rf /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/doc \
+ && echo ">> remove '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}samples' (saves ~200MB)" \
+ && rm -rf /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/samples
 
 #### Stage 2
 # this stage installs CUDNN
@@ -60,10 +82,13 @@ FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOC
 ENV DEBIAN_FRONTEND=noninteractive \
     DEBCONF_NONINTERACTIVE_SEEN=true
 
+ARG UBUNTU_VER
 ARG CUDA_MAJOR_VER
 ARG CUDA_MINOR_VER
-ARG CUDNN_VER
-ARG CUDNN_URL
+ARG CUDA_PATCH_VER
+ARG CUDA_DRV_MAJOR_VER
+ARG CUDA_DRV_MINOR_VER
+ARG CUDA_DRV_PATCH_VER
 
 RUN apt-get update \
  && apt-get install -y wget \
@@ -72,10 +97,21 @@ RUN apt-get update \
  && wget -qO - ${CUDNN_URL}/cudnn-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}-linux-x64-${CUDNN_VER}.tgz |tar xfz - -C /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/ --strip-components=1 \
  && rm -rf /var/lib/apt/lists/*
 
+#### Final Image
+# the final image copies CUDA into the parent and creates a symlink
 FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOCKER_IMG_HASH}
+
+ARG UBUNTU_VER
+ARG CUDA_MAJOR_VER
+ARG CUDA_MINOR_VER
+ARG CUDA_PATCH_VER
+ARG CUDA_DRV_MAJOR_VER
+ARG CUDA_DRV_MINOR_VER
+ARG CUDA_DRV_PATCH_VER
+
 LABEL org.qnib.nvidia.cuda.drv.version=${CUDA_DRV_MAJOR_VER}.${CUDA_DRV_MINOR_VER}
 LABEL platform.features=nvidia-${CUDA_DRV_MAJOR_VER}-${CUDA_DRV_MINOR_VER}
 
-COPY --from=cuda /usr/local/cuda-9.2 /usr/local/cuda-9.2
-COPY --from=cudnn /usr/local/cuda-9.2 /usr/local/cuda-9.2
-RUN ln -s /usr/local/cuda-9.2 /usr/local/cuda
+COPY --from=cudaprep /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER} /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}
+COPY --from=cudnn /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER} /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}
+RUN ln -s /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER} /usr/local/cuda
