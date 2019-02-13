@@ -1,0 +1,81 @@
+ARG FROM_IMG_REGISTRY=docker.io
+ARG FROM_IMG_REPO=qnib
+ARG FROM_IMG_NAME="uplain-init"
+ARG FROM_IMG_TAG="bionic-2018-12-23.1"
+ARG FROM_IMG_HASH=""
+
+ARG UBUNTU_VER=1710
+ARG CUDA_MAJOR_VER=9
+ARG CUDA_MINOR_VER=2
+ARG CUDA_PATCH_VER=148-1
+ARG CUDA_DRV_MAJOR_VER=396
+ARG CUDA_DRV_MINOR_VER=44
+ARG CUDA_DRV_PATCH_VER=0ubuntu1
+ARG CUDNN_VER=v7.4.1.5
+ARG CUDNN_URL=http://people.cs.uchicago.edu/~kauffman/nvidia/cudnn
+
+#### Stage 1
+# this stage installs CUDA
+FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOCKER_IMG_HASH} AS cuda
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DEBCONF_NONINTERACTIVE_SEEN=true
+
+ARG UBUNTU_VER
+ARG CUDA_MAJOR_VER
+ARG CUDA_MINOR_VER
+ARG CUDA_PATCH_VER
+ARG CUDA_DRV_MAJOR_VER
+ARG CUDA_DRV_MINOR_VER
+ARG CUDA_DRV_PATCH_VER
+
+ENV CUDA_MAJOR_VER=${CUDA_MAJOR_VER}
+ENV CUDA_MINOR_VER=${CUDA_MINOR_VER}
+ENV CUDA_PATCH_VER=${CUDA_PATCH_VER}
+ENV CUDA_DRV_MAJOR_VER=${CUDA_DRV_MAJOR_VER}
+ENV CUDA_DRV_MINOR_VER=${CUDA_DRV_MINOR_VER}
+ENV CUDA_DRV_PATCH_VER=${CUDA_DRV_PATCH_VER}
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends wget gnupg2 \
+ && rm -rf /var/lib/apt/lists/*
+RUN wget --no-check-certificate -c -v -nc https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VER}/x86_64/cuda-repo-ubuntu${UBUNTU_VER}_${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}.${CUDA_PATCH_VER}_amd64.deb \
+ && dpkg -i cuda-repo-ubuntu${UBUNTU_VER}_${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}.${CUDA_PATCH_VER}_amd64.deb \
+ && apt-key adv --fetch-keys http://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VER}/x86_64/7fa2af80.pub
+RUN apt-get update \
+ && apt-get install -y -o Dpkg::Options::="--force-overwrite" --no-install-recommends \
+       nvidia-${CUDA_DRV_MAJOR_VER}=${CUDA_DRV_MAJOR_VER}.${CUDA_DRV_MINOR_VER}-${CUDA_DRV_PATCH_VER} \
+       cuda-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER}=${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}.${CUDA_PATCH_VER} \
+ && rm -rf /var/lib/apt/lists/* \
+ && echo ">> Remove symlinks {include,lib64} in '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}' and move symlink-target (for multi-stage build)" \
+ && rm -f /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
+          /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
+ && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/include /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
+ && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64
+
+#### Stage 2
+# this stage installs CUDNN
+FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOCKER_IMG_HASH} AS cudnn
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DEBCONF_NONINTERACTIVE_SEEN=true
+
+ARG CUDA_MAJOR_VER
+ARG CUDA_MINOR_VER
+ARG CUDNN_VER
+ARG CUDNN_URL
+
+RUN apt-get update \
+ && apt-get install -y wget \
+ && mkdir -p /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/ \
+ && echo ${CUDNN_URL}/cudnn-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}-linux-x64-${CUDNN_VER}.tgz \
+ && wget -qO - ${CUDNN_URL}/cudnn-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}-linux-x64-${CUDNN_VER}.tgz |tar xfz - -C /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/ --strip-components=1 \
+ && rm -rf /var/lib/apt/lists/*
+
+FROM ${FROM_IMG_REGISTRY}/${FROM_IMG_REPO}/${FROM_IMG_NAME}:${FROM_IMG_TAG}${DOCKER_IMG_HASH}
+LABEL org.qnib.nvidia.cuda.drv.version=${CUDA_DRV_MAJOR_VER}.${CUDA_DRV_MINOR_VER}
+LABEL platform.features=nvidia-${CUDA_DRV_MAJOR_VER}-${CUDA_DRV_MINOR_VER}
+
+COPY --from=cuda /usr/local/cuda-9.2 /usr/local/cuda-9.2
+COPY --from=cudnn /usr/local/cuda-9.2 /usr/local/cuda-9.2
+RUN ln -s /usr/local/cuda-9.2 /usr/local/cuda
