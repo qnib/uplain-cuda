@@ -28,6 +28,8 @@ ARG CUDA_PATCH_VER
 ARG CUDA_DRV_MAJOR_VER
 ARG CUDA_DRV_MINOR_VER
 ARG CUDA_DRV_PATCH_VER
+ARG CUDNN_VER
+ARG CUDNN_URL
 
 ENV CUDA_MAJOR_VER=${CUDA_MAJOR_VER}
 ENV CUDA_MINOR_VER=${CUDA_MINOR_VER}
@@ -46,7 +48,12 @@ RUN apt-get update \
  && apt-get install -y -o Dpkg::Options::="--force-overwrite" --no-install-recommends \
        nvidia-${CUDA_DRV_MAJOR_VER}=${CUDA_DRV_MAJOR_VER}.${CUDA_DRV_MINOR_VER}-${CUDA_DRV_PATCH_VER} \
        cuda-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER}=${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}.${CUDA_PATCH_VER} \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && echo ">> Remove symlinks {include,lib64} in '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}' and move symlink-target (for multi-stage build)" \
+ && rm -f /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
+           /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
+ && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/include /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
+ && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64
 
 #### Stage 1.2
 # prepares CUDA for multi-stage build
@@ -65,12 +72,7 @@ ARG CUDA_DRV_PATCH_VER
 
 COPY --from=cuda /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER} /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}
 
-RUN echo ">> Remove symlinks {include,lib64} in '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}' and move symlink-target (for multi-stage build)" \
- && rm -f /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
-          /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
- && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/include /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/include \
- && mv /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/lib64 \
- && echo ">> remove '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/doc' (saves ~300MB)" \
+RUN echo ">> remove '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/doc' (saves ~300MB)" \
  && rm -rf /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/doc \
  && echo ">> remove '/usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}samples' (saves ~200MB)" \
  && rm -rf /usr/local/cuda-${CUDA_MAJOR_VER}.${CUDA_MINOR_VER}/samples
